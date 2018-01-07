@@ -31,6 +31,11 @@
 
             public IEventTraceOperand Build(int eventMetadataTableIndex)
             {
+                var strings = manifest.Items
+                    .OfType<LocalizationType>().SelectMany(x => x.Items)
+                    .OfType<LocalizationTypeResources>().SelectMany(x => x.Items)
+                    .OfType<StringTableType>().SelectMany(x => x.Items)
+                    .OfType<StringTableTypeString>().ToDictionary(x => x.id, x => x.value);
                 foreach (var instrumentationManifestTypeItem in this.manifest.Items)
                 {
                     var instrumentationType = instrumentationManifestTypeItem as InstrumentationType;
@@ -62,6 +67,8 @@
                                                         string opcode = definitionTypeItem.opcode == null ? string.Empty : definitionTypeItem.opcode.Name;
                                                         string version = definitionTypeItem.version;
                                                         string template = definitionTypeItem.template;
+                                                        string messageKey = definitionTypeItem.message == null ? "" : definitionTypeItem.message.Replace("$(string.", "").TrimEnd(')');
+                                                        strings.TryGetValue(messageKey, out string message);
 
                                                         string name = providerName + "/" + task + (opcode == string.Empty ? string.Empty : "/" + opcode);
                                                         var properties = new List<IEventTracePropertyOperand>();
@@ -94,7 +101,9 @@
                                                                 this.eventId,
                                                                 byte.Parse(version),
                                                                 name,
-                                                                properties.Select(t => t.Metadata).ToArray()), eventMetadataTableIndex,
+                                                                properties.Select(t => t.Metadata).ToArray(),
+                                                                message),
+                                                            eventMetadataTableIndex,
                                                             properties);
                                                         return operand;
                                                     }
@@ -131,11 +140,12 @@
                 string provider = this.BuildName("Provider", this.traceEventInfo->ProviderGuid.ToString(), this.traceEventInfo->ProviderNameOffset);
                 string task = this.BuildName("EventID", this.traceEventInfo->Id.ToString(), this.traceEventInfo->TaskNameOffset);
                 string opcode = this.BuildName("Opcode", this.traceEventInfo->Opcode.ToString(), this.traceEventInfo->OpcodeNameOffset);
+                string message = this.BuildName("EventMessage", "0", this.traceEventInfo->EventMessageOffset);
 
                 //WPP properties not supported
                 int end = this.traceEventInfo->DecodingSource == DECODING_SOURCE.DecodingSourceWPP ? 0 : (int)traceEventInfo->TopLevelPropertyCount;
                 var topLevelOperands = this.IterateProperties(buffer, 0, end, eventPropertyInfoArr);
-                return new EventTraceOperand(new EventMetadata(this.traceEventInfo->ProviderGuid, this.traceEventInfo->Id, this.traceEventInfo->Version, provider + "/" + task + "/" + opcode, this.flatPropertyList.Select(t => t.Metadata).ToArray()), eventMetadataTableIndex, topLevelOperands);
+                return new EventTraceOperand(new EventMetadata(this.traceEventInfo->ProviderGuid, this.traceEventInfo->Id, this.traceEventInfo->Version, provider + "/" + task + "/" + opcode, this.flatPropertyList.Select(t => t.Metadata).ToArray(), message), eventMetadataTableIndex, topLevelOperands);
             }
 
             private string BuildName(string prefix, string value, uint offset)
